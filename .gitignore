@@ -4,3 +4,9 @@
 .idea/
 
 .DS_Store
+
+__pycache__/
+checkpoint.txt
+failed_urls.csv
+Phishing_URL_Dataset.csv
+onr.py

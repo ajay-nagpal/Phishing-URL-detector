@@ -1,125 +1,207 @@
 import tldextract
-import re
 import math
 from urllib.parse import urlparse
 
 def extract_advanced_features(url):
 
-    # urlparse splits URL into:
-    # scheme, domain (netloc), path, query, etc.
+    # Parse the URL into
+    # scheme, domain, path,
+    # query, etc.
     parsed = urlparse(url)
 
-    # tldextract gives accurate domain parsing using public suffix list
-    # Example: login.google.com
-    # subdomain = login
-    # domain = google
-    # suffix = com
+    # tldextract accurately separates
+    # subdomain, domain and TLD.
     ext = tldextract.extract(url)
 
     subdomain = ext.subdomain
     domain = ext.domain
     tld = ext.suffix
 
-    # Rebuild full registered domain (domain + TLD)
-    registered_domain = f"{domain}.{tld}" if domain and tld else domain
+    # Convert to lowercase once.
+    # This avoids repeated calls
+    # to lower() later.
+    url_lower = url.lower()
+    sub_lower = subdomain.lower()
+    domain_lower = domain.lower()
 
-    subdomain_count = len(subdomain.split(".")) if subdomain else 0
-    
-    # Flag: too many subdomains often indicate phishing
-    many_subdomains = 1 if subdomain_count > 2 else 0
-
-    # SUSPICIOUS WORDS
-    words = [
-        "login", "verify", "secure",
-        "update", "bank", "account",
-        "password", "confirm"
-    ]
-    # Phishing URLs often contain urgent/security-related words
-    suspicious_words = sum(
-        1 for w in words if w in url.lower()
+    # Rebuild registered domain.
+    # Example:
+    # mail.google.com
+    # -> google.com
+    registered_domain = (
+        f"{domain}.{tld}"
+        if domain and tld
+        else domain
     )
-    is_suspicious_tld = 1 if tld in [
-        "xyz", "top", "click", "gq", "cf", "ml", "tk"
-    ] else 0
 
-    is_trusted_tld = 1 if tld in [
-        "com", "org", "net", "edu", "gov"
-    ] else 0
+    # SUBDOMAIN FEATURES
 
-    tld_unknown = 1 if (
-        is_suspicious_tld == 0 and is_trusted_tld == 0
-    ) else 0
-    
-    has_suspicious_word = 1 if suspicious_words > 0 else 0
+    # Number of subdomains.
+    # Example:
+    # login.secure.bank.example.com
+    # -> 3
+    subdomain_count = (
+        len(subdomain.split(".")) if subdomain else 0
+    )
 
-    brands = ["paypal", "google", "apple", "amazon", "microsoft", "facebook"]
+    # Too many subdomains often
+    # indicate phishing URLs.
+    many_subdomains = (1 if subdomain_count > 2 else 0)
 
-    brand_in_subdomain = any(b in subdomain.lower() for b in brands)
-    brand_in_domain = any(b in domain.lower() for b in brands)
+    # Very deep subdomains are
+    # commonly used to mimic
+    # trusted websites.
+    deep_subdomain = (1 if subdomain_count >= 3 else 0)
 
-    spoofed_brand = 1 if brand_in_subdomain or brand_in_domain else 0
+    very_deep_subdomain = (1 if subdomain_count >= 4 else 0)
 
-    #login.secure.bank.paypal.verify.xyz
-    deep_subdomain = 1 if subdomain_count >= 3 else 0
-    very_deep_subdomain = 1 if subdomain_count >= 4 else 0
+    # SUSPICIOUS WORD FEATURES
+
+    # Common phishing keywords.
+    suspicious_word_list = [
+        "login", "signin", "verify", "confirm",
+        "secure", "security", "password",
+        "account", "update", "bank", "banking",
+        "paypal", "ebay", "appleid", "alert"
+    ]
+
+    # Count how many suspicious
+    # words appear in the URL.
+    suspicious_words = sum(
+        1 for word in suspicious_word_list if word in url_lower
+    )
+
+    # Binary version of the
+    # suspicious word count.
+    has_suspicious_word = (1 if suspicious_words > 0 else 0)
+
+    # TOP LEVEL DOMAIN FEATURES
+
+    # Frequently abused TLDs.
+    suspicious_tlds = {"xyz","top","click","gq","cf","ml","tk"}
+
+    # Well-known trusted TLDs.
+    trusted_tlds = {"com","org","net","edu","gov"}
+
+    is_suspicious_tld = (1 if tld in suspicious_tlds else 0)
+
+    is_trusted_tld = (1 if tld in trusted_tlds else 0)
+
+    # Neither trusted nor
+    # suspicious.
+    tld_unknown = (
+        1 if (not is_suspicious_tld
+            and not is_trusted_tld)
+        else 0
+    )
+
+    # BRAND SPOOFING FEATURES
+
+    # Frequently impersonated
+    # brands.
+    brands = ["paypal","google","apple","amazon",
+                "microsoft","facebook","ebay"]
+
+    # Brand names appearing in
+    # subdomains are suspicious.
+    brand_in_subdomain = any(brand in sub_lower for brand in brands)
+
+    # Brand names inside the
+    # registered domain.
+    brand_in_domain = any(
+        brand in domain_lower
+        for brand in brands
+    )
+
+    # Indicates possible
+    # brand impersonation.
+    spoofed_brand = (
+        1 if (brand_in_subdomain
+            or brand_in_domain
+        )
+        else 0
+    )
 
     # PATH FEATURES
+    # PHP pages are common in
+    # phishing kits.
+    php_page = (1 if ".php" in url_lower else 0)
 
-    # Detect PHP-based pages (common in phishing kits)
-    php_page = 1 if ".php" in url.lower() else 0
+    # Long paths often hide
+    # fake login pages.
+    long_path = (1 if len(parsed.path) > 50 else 0)
 
-    # Long path often indicates deep fake login pages
-    long_path = 1 if len(parsed.path) > 50 else 0
-
-    # Number of directories in URL path
+    # Number of directories in
+    # the URL path.
     path_depth = parsed.path.count("/")
 
-    # URL encoding (%xx) used to hide malicious content
-    url_encoded = 1 if "%" in url else 0
+    # URL encoded characters
+    # (%20, %2F, etc.).
+    url_encoded = (1 if "%" in url else 0)
 
+    # REDIRECT / MASKING FEATURES
+
+    # '@' may hide the true
+    # destination of a URL.
     at_index = url.find("@")
-    redirect_masking = 1 if at_index > 0 else 0
 
-    # Randomness of URL
-    probability = [
-        url.count(c)/len(url)
-        for c in set(url)
-    ]
+    redirect_masking = (1 if at_index > 0 else 0)
 
-    entropy = -sum(
-        p * math.log2(p)
-        for p in probability
+    # Check whether '@' is part
+    # of valid authentication.
+    has_valid_auth = (parsed.username is not None )
+
+    # '@' exists but is not
+    # used for authentication.
+    has_at_misuse = (
+        1 if (at_index > 0 and not has_valid_auth)
+        else 0
     )
-    at_index = url.find("@")
-    has_valid_auth = parsed.username != ""
 
-    # @ exists in URL, but NOT used for proper authentication
-    has_at_misuse = 1 if (at_index > 0 and not has_valid_auth) else 0
+    # URL ENTROPY
+
+    # High entropy usually
+    # indicates random-looking
+    # URLs generated by attackers.
+    if url:
+        probabilities = [
+            url.count(char) / len(url)
+            for char in set(url)
+        ]
+        entropy = -sum(
+            probability * math.log2(probability)
+            for probability in probabilities
+        )
+    else:
+        entropy = 0
 
     return {
 
-    "subdomain": subdomain,
-    "domain": domain,
-    "tld": tld,
-    "registered_domain": registered_domain,
+        "subdomain": subdomain,
+        "domain": domain,
+        "tld": tld,
+        "registered_domain": registered_domain,
 
-    "subdomain_count": subdomain_count,
-    "many_subdomains": many_subdomains,
+        "subdomain_count": subdomain_count,
+        "many_subdomains": many_subdomains,
 
-    "suspicious_words": suspicious_words,
-    "has_suspicious_word": has_suspicious_word,
+        "is_suspicious_tld": is_suspicious_tld,
+        "is_trusted_tld": is_trusted_tld,
+        "tld_unknown": tld_unknown,
 
-    "spoofed_brand": spoofed_brand,
-    "deep_subdomain": deep_subdomain,
-    "very_deep_subdomain": very_deep_subdomain,
+        "suspicious_words": suspicious_words,
+        "has_suspicious_word": has_suspicious_word,
 
-    "php_page": php_page,
-    "long_path": long_path,
-    "path_depth": path_depth,
+        "spoofed_brand": spoofed_brand,
+        "deep_subdomain": deep_subdomain,
+        "very_deep_subdomain": very_deep_subdomain,
 
-    "url_encoded": url_encoded,
-    "entropy": entropy,
-    "redirect_masking": redirect_masking,
-    "has_at_misuse": has_at_misuse
+        "php_page": php_page,
+        "long_path": long_path,
+        "path_depth": path_depth,
 
-}
+        "url_encoded": url_encoded,
+        "entropy": entropy,
+        "redirect_masking": redirect_masking,
+        "has_at_misuse": has_at_misuse
+    }
